@@ -1,25 +1,64 @@
 #!/bin/bash
 #
 # Nexus
-# The Nexus AI Command Line Interface
+# The Nexus AI Command Line Interface and main dispatcher.
 
 set -e
 
-# --- Flag Handling ---
+# --- Subcommand Dispatcher ---
 case "$1" in
     --version|-v)
-        echo "Nexus AI Tools - Version 1.0.0"
-        echo "  - ask: v1.0.0"
-        echo "  - code-assist: v1.0.0"
-        echo "  - aic_helper: v1.0.0"
+        echo "Nexus AI Tools - Version 1.2.0"
+        echo "  - ask, code-assist, aic_helper: v1.2.0"
+        echo "  - nexus subcommands: v1.0.0"
         exit 0
         ;;
+
+    git-auth)
+        # --- Git Authentication Subcommand ---
+        if [[ $EUID -ne 0 ]]; then
+            echo "ERROR: 'nexus git-auth' must be run with sudo." >&2
+            exit 1
+        fi
+
+        if [ "$#" -ne 2 ]; then
+            echo "Usage: cd /path/to/repo && sudo nexus git-auth <personal_access_token>" >&2
+            exit 1
+        fi
+
+        TOKEN="$2"
+        CALLING_USER="${SUDO_USER:-$USER}"
+        CALLING_USER_HOME=$(getent passwd "${CALLING_USER}" | cut -d: -f6)
+        NEXUS_CONFIG_DIR="${CALLING_USER_HOME}/.config/nexus"
+        GIT_AUTH_CONFIG="${NEXUS_CONFIG_DIR}/git_auth.conf"
+
+        mkdir -p "$NEXUS_CONFIG_DIR"
+        touch "$GIT_AUTH_CONFIG"
+        chown -R "${CALLING_USER}:${CALLING_USER}" "$NEXUS_CONFIG_DIR"
+        chmod 700 "$NEXUS_CONFIG_DIR"
+        chmod 600 "$GIT_AUTH_CONFIG"
+
+        REPO_URL=$(sudo -u "${CALLING_USER}" git config --get remote.origin.url)
+        if [ -z "$REPO_URL" ]; then
+            echo "Error: Could not find remote.origin.url. Are you inside a Git repository?" >&2
+            exit 1
+        fi
+
+        sed -i "\|$REPO_URL|d" "$GIT_AUTH_CONFIG"
+        echo "repo=${REPO_URL} token=${TOKEN}" >> "$GIT_AUTH_CONFIG"
+
+        echo "--> Successfully associated token with ${REPO_URL}"
+        echo "    Authentication is now handled by the Nexus credential helper."
+        exit 0
+        ;;
+
     *)
         echo "Nexus AI Tools - A suite of command-line assistants."
-        echo "Usage: nexus [command]"
+        echo "Usage: nexus <command>"
         echo ""
         echo "Commands:"
-        echo "  --version, -v    Show version information"
+        echo "  git-auth <token>    Associate a Personal Access Token with the current repository."
+        echo "  --version, -v       Show version information."
         echo ""
         echo "See also: ask, code-assist, git aic"
         exit 0
