@@ -1,0 +1,27 @@
+#!/bin/bash
+#
+# Nexus
+# The Nexus AI Command Line Interface
+
+set -e
+
+# --- Flag Handling ---
+case "$1" in
+    --version|-v)
+        echo "Nexus AI Tools - Version 1.0.0"
+        echo "  - ask: v1.0.0"
+        echo "  - code-assist: v1.0.0"
+        echo "  - aic_helper: v1.0.0"
+        exit 0
+        ;;
+    *)
+        echo "Nexus AI Tools - A suite of command-line assistants."
+        echo "Usage: nexus [command]"
+        echo ""
+        echo "Commands:"
+        echo "  --version, -v    Show version information"
+        echo ""
+        echo "See also: ask, code-assist, git aic"
+        exit 0
+        ;;
+esac
