@@ -12,7 +12,8 @@ CONFIG_FILE="${CONFIG_DIR}/config"
 FUNCTIONS_FILE="/usr/local/bin/gemini_functions.sh"
 NEXUS_COMMAND_PATH="/usr/local/bin/nexus"
 GIT_CREDENTIAL_HELPER_PATH="/usr/local/bin/git-credential-nexus"
-CALLING_USER_HOME=$(getent passwd "${SUDO_USER:-$USER}" | cut -d: -f6)
+CALLING_USER="${SUDO_USER:-$USER}"
+CALLING_USER_HOME=$(getent passwd "${CALLING_USER}" | cut -d: -f6)
 BASHRC_PATH="${CALLING_USER_HOME}/.bashrc"
 
 # --- Script Start ---
@@ -48,9 +49,9 @@ set -e
 # --- Subcommand Dispatcher ---
 case "$1" in
     --version|-v)
-        echo "Nexus AI Tools - Version 1.2.0"
-        echo "  - ask, code-assist, aic_helper: v1.2.0"
-        echo "  - nexus subcommands: v1.0.0"
+        echo "Nexus AI Tools - Version 1.8.0 (Stable)"
+        echo "  - ask, code-assist, aic_helper: v1.8.0"
+        echo "  - nexus subcommands: v1.6.0"
         exit 0
         ;;
 
@@ -110,17 +111,37 @@ EOF
 cat > "$GIT_CREDENTIAL_HELPER_PATH" << 'EOF'
 #!/bin/bash
 # git-credential-nexus - Git credential helper for Nexus.
+# Reads protocol, host, and path from stdin to find a repo-specific token.
 set -e
+
+# Find the config file in the home directory of the user running 'git'
 USER_HOME=$(getent passwd "$(whoami)" | cut -d: -f6)
 GIT_AUTH_CONFIG="${USER_HOME}/.config/nexus/git_auth.conf"
-if [ ! -f "$GIT_AUTH_CONFIG" ]; then exit 0; fi
-while read -r line; do
-    if [[ $line == host=* ]]; then host=${line#host=}; fi
-    if [[ $line == protocol=* ]]; then protocol=${line#protocol=}; fi
+
+if [ ! -f "$GIT_AUTH_CONFIG" ]; then
+    exit 0
+fi
+
+# Git provides key-value pairs on stdin. Read them all.
+declare -A git_params
+while IFS='=' read -r key value; do
+    if [ -n "$key" ]; then
+        git_params["$key"]="$value"
+    fi
 done
-if [ -z "$host" ] || [ -z "$protocol" ]; then exit 0; fi
-SEARCH_URL="${protocol}://${host}"
-TOKEN=$(grep "repo=.*${SEARCH_URL}" "$GIT_AUTH_CONFIG" | head -n 1 | sed -n 's/.*token=\(.*\)/\1/p')
+
+protocol=${git_params[protocol]}
+host=${git_params[host]}
+path=${git_params[path]}
+
+if [ -z "$protocol" ] || [ -z "$host" ] || [ -z "$path" ]; then
+    exit 0
+fi
+
+REPO_URL="https://${host}/${path}"
+
+TOKEN=$(grep -F "repo=${REPO_URL}" "$GIT_AUTH_CONFIG" | awk -F'token=' '{print $2}' | head -n 1)
+
 if [ -n "$TOKEN" ]; then
     echo "username=token"
     echo "password=${TOKEN}"
@@ -164,7 +185,11 @@ EOF
 
 # Make all scripts executable
 chmod +x "$NEXUS_COMMAND_PATH" "$GIT_CREDENTIAL_HELPER_PATH" "$FUNCTIONS_FILE"
-echo "AI functions and commands created and made executable."
+chown "${CALLING_USER}:${CALLING_USER}" "$NEXUS_COMMAND_PATH"
+chown "${CALLING_USER}:${CALLING_USER}" "$GIT_CREDENTIAL_HELPER_PATH"
+chown "${CALLING_USER}:${CALLING_USER}" "$FUNCTIONS_FILE"
+
+echo "AI functions and commands created and configured."
 
 # --- Shell Configuration ---
 echo "  ---------> Configuring shell environment (.bashrc) <---------  "
@@ -178,8 +203,11 @@ fi
 
 # --- Git Configuration ---
 echo "  ---------> Configuring Git <---------  "
-sudo -u "${CALLING_USER}" git config --global alias.aic '!bash -c "source /usr/local/bin/gemini_functions.sh && git diff --staged | aic_helper | git commit -F -"'
-sudo -u "${CALLING_USER}" git config --global credential.helper "/usr/local/bin/git-credential-nexus"
+# Use 'su' to run the git config commands as the original user.
+su - "${CALLING_USER}" -c "git config --global alias.aic '!bash -c \"source /usr/local/bin/gemini_functions.sh && git diff --staged | aic_helper | git commit -F -\"'"
+su - "${CALLING_USER}" -c "git config --global credential.helper /usr/local/bin/git-credential-nexus"
+# **CRITICAL FIX:** Tell Git to send the full path to the credential helper.
+su - "${CALLING_USER}" -c "git config --global credential.useHttpPath true"
 echo "Git alias 'aic' and credential helper 'nexus' created."
 
 # --- Final Message ---
